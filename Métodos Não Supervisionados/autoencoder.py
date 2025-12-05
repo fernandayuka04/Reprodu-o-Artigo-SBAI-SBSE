@@ -26,10 +26,10 @@ os.environ['PYTHONHASHSEED'] = str(SEED)
 tf.random.set_seed(SEED) # Configura a seed do TensorFlow
 DATA_PATH = os.path.join('../data set', 'data set.csv')
 
-# --- Funções de Preparação de Dados e Avaliação (Omitidas por brevidade, mas devem ser incluídas) ---
-# (load_sgcc_data, preprocess_data, print_results - Usar as mesmas do Script 1.1)
+# --- Funções de Preparação de Dados e Avaliação ---
+
 def load_sgcc_data(path):
-    # ... (código da função)
+    """Carrega dados ou gera dados simulados em caso de falha."""
     try:
         df = pd.read_csv(path)
         TARGET_COLUMN = df.columns[-1]
@@ -50,28 +50,31 @@ def load_sgcc_data(path):
         X_sim = np.vstack([X_normal, X_fraud]); y_sim = np.array([0] * X_normal.shape[0] + [1] * X_fraud.shape[0])
         print("ERRO: Arquivo não encontrado. Usando dados SIMULADOS.")
         return X_sim, y_sim, N_DAYS_SIM
+
 def preprocess_data(X_data, fit_scaler=False, scaler=None):
-    # ... (código da função)
+    """Realiza imputação linear de NaNs e normaliza os dados com MinMaxScaler."""
     X_imputed = X_data.copy()
     for i in range(X_imputed.shape[0]):
         series = X_imputed[i, :]
         not_nan_indices = np.where(~np.isnan(series))[0]
         nan_indices = np.where(np.isnan(series))[0]
         if len(not_nan_indices) >= 2:
+            # Interpolação linear para preencher NaNs
             interp_func = interp1d(not_nan_indices, series[not_nan_indices], kind='linear', fill_value='extrapolate')
             series[nan_indices] = interp_func(nan_indices)
         series[np.isnan(series)] = 0
         X_imputed[i, :] = series
 
+    # Tratamento básico de outliers (clipped no 2*std acima da média)
     avg_x = np.mean(X_imputed, axis=0)
     std_x = np.std(X_imputed, axis=0)
     threshold = avg_x + 2 * std_x
     X_outlier_handled = X_imputed.copy()
-
     for j in range(X_outlier_handled.shape[1]):
         mask = X_outlier_handled[:, j] > threshold[j]
         X_outlier_handled[mask, j] = threshold[j]
 
+    # Normalização
     if fit_scaler:
         scaler = MinMaxScaler()
         X_scaled = scaler.fit_transform(X_outlier_handled)
@@ -79,13 +82,29 @@ def preprocess_data(X_data, fit_scaler=False, scaler=None):
     else:
         X_scaled = scaler.transform(X_outlier_handled)
         return X_scaled, scaler
-def print_results(title, results):
-    # ... (código da função)
-    print(f"\n--- {title} ---")
-    print(pd.Series(results).apply(lambda x: f'{x:.2f}%'))
-    print("-" * 50)
 
-# --- Função de Criação e Avaliação do Autoencoder ---
+def print_results(title, results):
+    """Imprime os resultados detalhados das métricas."""
+    print(f"\n--- {title} ---")
+    print("Métrica | Classe 0 (Normal) | Classe 1 (Fraude) | Média Macro")
+    print("-" * 65)
+
+    # Imprime Acurácia (é um valor único, repete para o formato)
+    acc = results['Acc']
+    print(f"Acc.    | {acc:.2f}% | {acc:.2f}% | {acc:.2f}%")
+
+    # Imprime Precisão (Precision)
+    prec_0, prec_1, prec_avg = results['Prec(0)'], results['Prec(1)'], results['Prec(avg)']
+    print(f"Prec.   | {prec_0:.2f}% | {prec_1:.2f}% | {prec_avg:.2f}%")
+
+    # Imprime Recall
+    rec_0, rec_1, rec_avg = results['Rec(0)'], results['Rec(1)'], results['Rec(avg)']
+    print(f"Recall  | {rec_0:.2f}% | {rec_1:.2f}% | {rec_avg:.2f}%")
+
+    # Imprime F1-Score
+    f1_0, f1_1, f1_avg = results['F1(0)'], results['F1(1)'], results['F1(avg)']
+    print(f"F1-Score| {f1_0:.2f}% | {f1_1:.2f}% | {f1_avg:.2f}%")
+    print("-" * 65)
 
 def create_autoencoder(input_dim):
     """Constrói o modelo Autoencoder (Arquitetura: 32, 16, 8, 16, 32)."""
@@ -109,20 +128,44 @@ def create_autoencoder(input_dim):
     return autoencoder
 
 def evaluate_autoencoder_model(model, X_test, y_test, threshold):
-    """Avalia o AE baseado no erro de reconstrução."""
+    """
+    Avalia o AE baseado no erro de reconstrução e calcula as métricas detalhadas.
+    """
+    # 1. Reconstrução
     X_reconstructed = model.predict(X_test, verbose=0)
-    # Erro de reconstrução (MSE) por amostra
+    # 2. Cálculo do Erro de Reconstrução
     reconstruction_error = np.mean(np.square(X_test - X_reconstructed), axis=1)
+    # 3. Predição
     # Predição: Se o erro > threshold (anomalia), rótulo = 1 (fraude)
     y_pred = (reconstruction_error > threshold).astype(int)
 
-    # Cálculo das métricas
+    # 4. Cálculo das Métricas (usando sklearn.metrics)
+
+    # Métrica: Acurácia geral
+    accuracy = accuracy_score(y_test, y_pred) * 100
+
+    # Métricas: Média Macro
+    prec_macro = precision_score(y_test, y_pred, average='macro', zero_division=0) * 100
+    rec_macro = recall_score(y_test, y_pred, average='macro', zero_division=0) * 100
+    f1_macro = f1_score(y_test, y_pred, average='macro', zero_division=0) * 100
+
+    # Métricas: Por Classe (usando average=None)
+    prec_per_class = precision_score(y_test, y_pred, average=None, zero_division=0) * 100
+    rec_per_class = recall_score(y_test, y_pred, average=None, zero_division=0) * 100
+    f1_per_class = f1_score(y_test, y_pred, average=None, zero_division=0) * 100
+
     results = {
-        'Acc(avg)': accuracy_score(y_test, y_pred) * 100,
-        'Prec(avg)': precision_score(y_test, y_pred, average='macro', zero_division=0) * 100,
-        'Rec(avg)': recall_score(y_test, y_pred, average='macro', zero_division=0) * 100,
-        'F1(avg)': f1_score(y_test, y_pred, average='macro', zero_division=0) * 100,
-        'Rec(1)': recall_score(y_test, y_pred, pos_label=1, zero_division=0) * 100,
+        'Acc': accuracy,
+        'Prec(avg)': prec_macro,
+        'Rec(avg)': rec_macro,
+        'F1(avg)': f1_macro,
+        # Resultados por classe: [Classe 0, Classe 1]
+        'Prec(0)': prec_per_class[0],
+        'Prec(1)': prec_per_class[1],
+        'Rec(0)': rec_per_class[0],
+        'Rec(1)': rec_per_class[1],
+        'F1(0)': f1_per_class[0],
+        'F1(1)': f1_per_class[1],
     }
     return results
 
@@ -131,7 +174,7 @@ def evaluate_autoencoder_model(model, X_test, y_test, threshold):
 # 1. Carregar e Dividir Dados
 X_raw, y, N_DAYS = load_sgcc_data(DATA_PATH)
 X_train_full, X_test, y_train_full, y_test = train_test_split(X_raw, y, test_size=0.3, random_state=SEED, stratify=y)
-X_train_normal = X_train_full[y_train_full == 0]
+X_train_normal = X_train_full[y_train_full == 0] # Filtra apenas a classe normal para treino
 
 # 2. Pré-processamento
 X_train_normal_scaled, scaler = preprocess_data(X_train_normal, fit_scaler=True)
@@ -146,15 +189,16 @@ model_ae_none = create_autoencoder(INPUT_DIM)
 print("\n--- AE (None Sampling) - Configuração ---")
 print(f"Arquitetura: (32, 16, 8, 16, 32)")
 print("Treinamento: 50 Epochs, 32 Batch Size, Loss: MSE")
+print(f"Limiar de Anomalia (AE_THRESHOLD): {AE_THRESHOLD}")
 print(f"Treinamento em {X_train_normal_scaled.shape[0]} amostras normais.")
 
 # Treinamento: O input é igual ao target (reconstrução da entrada)
 model_ae_none.fit(X_train_normal_scaled, X_train_normal_scaled,
                   epochs=50,
                   batch_size=32,
-                  validation_split=0.2, # Usado para monitorar a perda durante o treino
+                  validation_split=0.2,
                   verbose=0)
 
 # 4. Avaliação
 results_ae_none = evaluate_autoencoder_model(model_ae_none, X_test_scaled, y_test, AE_THRESHOLD)
-print_results("AE (None Sampling) - Resultados", results_ae_none)
+print_results("AE (None Sampling) - Resultados Detalhados", results_ae_none)
