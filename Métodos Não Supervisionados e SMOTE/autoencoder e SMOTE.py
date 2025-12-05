@@ -1,13 +1,20 @@
 # ==============================================================================
-# 1. Importação das Bibliotecas Necessárias
+# SCRIPT 6/6: Autoencoder (AE) COM SMOTE
+# Objetivo: Treinar e avaliar o AE usando SMOTE para balancear a classe de
+#           fraude (1) no conjunto de treino, permitindo que o AE aprenda
+#           a reconstruir o padrão de fraude também.
+# Dependência: tensorflow/keras, imblearn
 # ==============================================================================
+
+# 1. Importação das Bibliotecas Necessárias
 import pandas as pd # Manipulação de DataFrames.
 import numpy as np  # Operações numéricas.
 from collections import Counter # Contagem de classes.
 from imblearn.over_sampling import SMOTE # Técnica de Sobreamostragem de Minoria Sintética.
 from sklearn.preprocessing import MinMaxScaler # Normalização: usado na referência do Autoencoder.
 from sklearn.model_selection import train_test_split # Para separar dados de treino e teste.
-from sklearn.metrics import recall_score, f1_score, accuracy_score, precision_score # Métricas de avaliação.
+# Módulos para cálculo das métricas
+from sklearn.metrics import recall_score, f1_score, accuracy_score, precision_score
 from scipy.interpolate import interp1d # Para preenchimento de valores ausentes (interpolação).
 import os # Para gerenciamento de caminho de arquivos.
 
@@ -37,18 +44,16 @@ AE_THRESHOLD = 0.05 # Limiar de erro de reconstrução definido na sua referênc
 def load_sgcc_data(path):
     """Carrega o dataset real ou gera dados simulados se o arquivo não for encontrado."""
     try:
-        # Se você tivesse o 'data set.csv' no caminho, ele seria carregado aqui.
         df = pd.read_csv(path)
         TARGET_COLUMN = df.columns[-1]
         y = df[TARGET_COLUMN].values
         X_data_raw = df.drop(columns=[TARGET_COLUMN])
-        # Converte para numpy array
         X_data = X_data_raw.apply(pd.to_numeric, errors='coerce').values
         N_DAYS = X_data.shape[1]
         print(f"Dados carregados: {X_data.shape[0]} consumidores, {N_DAYS} dias.")
         return X_data, y, N_DAYS
     except FileNotFoundError:
-        # Lógica de SIMULAÇÃO caso o arquivo não seja encontrado (idêntica à sua referência)
+        # Lógica de SIMULAÇÃO caso o arquivo não seja encontrado
         N_SAMPLES = 1000; N_DAYS_SIM = 1035; FRAUD_RATE = 0.0853
         time = np.linspace(0, 2 * np.pi, N_DAYS_SIM)
         X_normal = np.tile(50 + 20 * np.sin(time * 5), (int(N_SAMPLES * (1 - FRAUD_RATE)), 1)) + np.random.normal(0, 5, (int(N_SAMPLES * (1 - FRAUD_RATE)), N_DAYS_SIM))
@@ -96,10 +101,30 @@ def preprocess_data(X_data, fit_scaler=False, scaler=None):
         return X_scaled, scaler
 
 def print_results(title, results):
-    """Imprime os resultados formatados."""
+    """Imprime os resultados detalhados das métricas no formato de tabela."""
     print(f"\n--- {title} ---")
-    print(pd.Series(results).apply(lambda x: f'{x:.2f}%'))
-    print("-" * 50)
+    print("Métrica | Classe 0 (Normal) | Classe 1 (Fraude) | Média Macro")
+    print("-" * 65)
+
+    # Imprime Acurácia (é um valor único, repete para o formato)
+    acc = results['Acc']
+    print(f"Acc.    | {acc:.2f}% | {acc:.2f}% | {acc:.2f}%")
+
+    # Imprime Precisão (Precision)
+    prec_0, prec_1, prec_avg = results['Prec(0)'], results['Prec(1)'], results['Prec(avg)']
+    # Maior e Menor valor estão em prec_0 e prec_1
+    print(f"Prec.   | {prec_0:.2f}% | {prec_1:.2f}% | {prec_avg:.2f}%")
+
+    # Imprime Recall
+    rec_0, rec_1, rec_avg = results['Rec(0)'], results['Rec(1)'], results['Rec(avg)']
+    # Maior e Menor valor estão em rec_0 e rec_1
+    print(f"Recall  | {rec_0:.2f}% | {rec_1:.2f}% | {rec_avg:.2f}%")
+
+    # Imprime F1-Score
+    f1_0, f1_1, f1_avg = results['F1(0)'], results['F1(1)'], results['F1(avg)']
+    # Maior e Menor valor estão em f1_0 e f1_1
+    print(f"F1-Score| {f1_0:.2f}% | {f1_1:.2f}% | {f1_avg:.2f}%")
+    print("-" * 65)
 
 def create_autoencoder(input_dim):
     """Constrói o modelo Autoencoder (Arquitetura: 32, 16, 8, 16, 32)."""
@@ -123,20 +148,44 @@ def create_autoencoder(input_dim):
     return autoencoder
 
 def evaluate_autoencoder_model(model, X_test, y_test, threshold):
-    """Avalia o AE baseado no erro de reconstrução."""
+    """
+    Avalia o AE baseado no erro de reconstrução e calcula as métricas detalhadas.
+    """
+    # 1. Reconstrução
     X_reconstructed = model.predict(X_test, verbose=0)
-    # Erro de reconstrução (MSE) por amostra
+    # 2. Cálculo do Erro de Reconstrução
     reconstruction_error = np.mean(np.square(X_test - X_reconstructed), axis=1)
+    # 3. Predição
     # Predição: Se o erro > threshold (anomalia), rótulo = 1 (fraude)
     y_pred = (reconstruction_error > threshold).astype(int)
 
-    # Cálculo das métricas
+    # 4. Cálculo das Métricas (usando sklearn.metrics)
+
+    # Métrica: Acurácia geral
+    accuracy = accuracy_score(y_test, y_pred) * 100 # Acurácia (Acc)
+
+    # Métricas: Média Macro (Prec(avg), Rec(avg), F1(avg))
+    prec_macro = precision_score(y_test, y_pred, average='macro', zero_division=0) * 100
+    rec_macro = recall_score(y_test, y_pred, average='macro', zero_division=0) * 100
+    f1_macro = f1_score(y_test, y_pred, average='macro', zero_division=0) * 100
+
+    # Métricas: Por Classe (usando average=None) -> Permite determinar Maior/Menor
+    prec_per_class = precision_score(y_test, y_pred, average=None, zero_division=0) * 100
+    rec_per_class = recall_score(y_test, y_pred, average=None, zero_division=0) * 100
+    f1_per_class = f1_score(y_test, y_pred, average=None, zero_division=0) * 100
+
     results = {
-        'Acc(avg)': accuracy_score(y_test, y_pred) * 100,
-        'Prec(avg)': precision_score(y_test, y_pred, average='macro', zero_division=0) * 100,
-        'Rec(avg)': recall_score(y_test, y_pred, average='macro', zero_division=0) * 100,
-        'F1(avg)': f1_score(y_test, y_pred, average='macro', zero_division=0) * 100,
-        'Rec(1)': recall_score(y_test, y_pred, pos_label=1, zero_division=0) * 100,
+        'Acc': accuracy, # Acurácia geral
+        'Prec(avg)': prec_macro, # Média Macro da Precisão
+        'Rec(avg)': rec_macro, # Média Macro do Recall
+        'F1(avg)': f1_macro, # Média Macro do F1-Score
+        # Resultados por classe: [Classe 0, Classe 1] - Permite determinar o Maior e Menor valor de cada métrica
+        'Prec(0)': prec_per_class[0],
+        'Prec(1)': prec_per_class[1],
+        'Rec(0)': rec_per_class[0],
+        'Rec(1)': rec_per_class[1],
+        'F1(0)': f1_per_class[0],
+        'F1(1)': f1_per_class[1],
     }
     return results
 
@@ -145,8 +194,7 @@ def evaluate_autoencoder_model(model, X_test, y_test, threshold):
 # ==============================================================================
 
 # 4.1 Carregar e Dividir Dados
-X_raw, y, N_DAYS = load_sgcc_data(DATA_PATH) # Carrega os dados (reais ou simulados).
-# Separa 70% para treino e 30% para teste, mantendo a proporção de classes (stratify).
+X_raw, y, N_DAYS = load_sgcc_data(DATA_PATH)
 X_train_full, X_test, y_train_full, y_test = train_test_split(X_raw, y, test_size=0.3, random_state=SEED, stratify=y)
 
 print("\n" + "=" * 60)
@@ -172,15 +220,14 @@ print(f"Número total de amostras no treino depois do SMOTE: {len(X_res)}")
 print("-" * 60)
 
 # 4.4 Configuração e Treinamento do Autoencoder (Autocloud)
-INPUT_DIM = X_res.shape[1] # A dimensão de entrada é o número de dias/features.
+INPUT_DIM = X_res.shape[1]
 model_ae_smote = create_autoencoder(INPUT_DIM)
 
 print(f"Treinamento do Autoencoder com SMOTE (em {X_res.shape[0]} amostras balanceadas)...")
 
 # Treinamento: Utiliza o dataset BALANCEADO (X_res) para aprender a reconstruir ambos os padrões.
-# O X_res é usado como entrada e saída (auto-reconstrução).
 model_ae_smote.fit(X_res, X_res,
-                    epochs=50, # Usando 50 epochs conforme sua referência
+                    epochs=50,
                     batch_size=32,
                     validation_split=0.2,
                     verbose=0)
@@ -188,25 +235,13 @@ model_ae_smote.fit(X_res, X_res,
 print("Treinamento do Autoencoder (SMOTE) concluído.")
 
 # 4.5 Avaliação
-# Para calcular o limiar, o método mais robusto é usar SOMENTE os erros da classe NORMAL
-# no conjunto de treino.
-
-# 1. Obter o erro de reconstrução no conjunto de treino balanceado.
-X_train_res_predictions = model_ae_smote.predict(X_res, verbose=0)
-train_mse_res = np.mean(np.square(X_res - X_train_res_predictions), axis=1)
-
-# 2. Obter os erros de reconstrução das amostras NORMAIS do treino (y_res == 0).
-error_normal_train = train_mse_res[y_res == 0]
-
-# 3. Definir o limiar (Threshold) com base nos dados normais do TREINO.
-# O método estatístico é mais comum, mas usaremos o valor fixo da sua referência:
-# threshold = np.mean(error_normal_train) + 2 * np.std(error_normal_train)
+# O limiar é definido com base na referência.
 threshold = AE_THRESHOLD # Limiar fixo de 0.05 conforme sua referência.
 
 print(f"\nLimiar (Threshold) Utilizado: {threshold:.4f} (Fixo/Referência)")
 print("-" * 60)
 
-# 4. Avaliar o modelo no conjunto de TESTE (X_test_scaled)
+# 4.6 Avaliar o modelo no conjunto de TESTE (X_test_scaled)
 results_ae_smote = evaluate_autoencoder_model(model_ae_smote, X_test_scaled, y_test, threshold)
-print_results("Autoencoder TREINADO com SMOTE - Resultados no Teste", results_ae_smote)
+print_results("Autoencoder TREINADO com SMOTE - Resultados Detalhados no Teste", results_ae_smote)
 print("=" * 60)
