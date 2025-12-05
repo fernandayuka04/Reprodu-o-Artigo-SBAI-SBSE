@@ -6,7 +6,8 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Dense
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.losses import MeanSquaredError
-from sklearn.metrics import classification_report, roc_auc_score
+# Linha 12: Importações necessárias para cálculo detalhado de métricas
+from sklearn.metrics import classification_report, roc_auc_score, accuracy_score, precision_score, recall_score, f1_score
 
 # --- CONFIGURAÇÃO ---
 # Nome do arquivo de dados SGCC fornecido pelo usuário
@@ -175,13 +176,78 @@ def create_autoencoder(input_dim, encoding_dim):
 
     return model
 
+# ==============================================================================
+# 5. Funções de Avaliação Detalhada (Inclusão)
+# ==============================================================================
+
+def evaluate_model_detailed(Y_test, Y_pred):
+    """
+    Linha 209: Calcula Acurácia, Precisão, Recall e F1-Score por classe e Média Macro.
+    """
+    # Linha 213: Métrica: Acurácia geral
+    accuracy = accuracy_score(Y_test, Y_pred) * 100
+
+    # Média Macro (average='macro') - VALOR MÉDIO
+    # Linha 217-219: Cálculo dos valores médios
+    prec_macro = precision_score(Y_test, Y_pred, average='macro', zero_division=0) * 100
+    rec_macro = recall_score(Y_test, Y_pred, average='macro', zero_division=0) * 100
+    f1_macro = f1_score(Y_test, Y_pred, average='macro', zero_division=0) * 100
+
+    # Por Classe (average=None) - Base para MENOR e MAIOR valor
+    # Linha 222-224: Cálculo dos valores individuais por classe
+    prec_per_class = precision_score(Y_test, Y_pred, average=None, zero_division=0) * 100
+    rec_per_class = recall_score(Y_test, Y_pred, average=None, zero_division=0) * 100
+    f1_per_class = f1_score(Y_test, Y_pred, average=None, zero_division=0) * 100
+
+    results = {
+        'Acc': accuracy,
+        'Prec(avg)': prec_macro,
+        'Rec(avg)': rec_macro,
+        'F1(avg)': f1_macro,
+        # Linha 231-236: Resultados por classe (Classe 0: Normal, Classe 1: Anomalia)
+        'Prec(0)': prec_per_class[0],
+        'Prec(1)': prec_per_class[1],
+        'Rec(0)': rec_per_class[0],
+        'Rec(1)': rec_per_class[1],
+        'F1(0)': f1_per_class[0],
+        'F1(1)': f1_per_class[1],
+    }
+    return results
+
+
+def print_detailed_results(title, results):
+    """Linha 241: Imprime os resultados detalhados das métricas no formato de tabela."""
+    print(f"\n--- {title} ---")
+    # Linha 244: Cabeçalho da Tabela
+    # Classe 0 e Classe 1 mostram os valores individuais, o que permite identificar
+    # o menor e o maior valor obtido para aquela métrica. A Média Macro é o valor médio.
+    print("Métrica | Classe 0 (Normal) | Classe 1 (Anomalia) | Média Macro")
+    print("-" * 65)
+
+    # Linha 249-250: Imprime Acurácia
+    acc = results['Acc']
+    print(f"Acc.    | {acc:.2f}% | {acc:.2f}% | {acc:.2f}%")
+
+    # Linha 253-254: Imprime Precisão
+    prec_0, prec_1, prec_avg = results['Prec(0)'], results['Prec(1)'], results['Prec(avg)']
+    print(f"Prec.   | {prec_0:.2f}% | {prec_1:.2f}% | {prec_avg:.2f}%")
+
+    # Linha 257-258: Imprime Recall
+    rec_0, rec_1, rec_avg = results['Rec(0)'], results['Rec(1)'], results['Rec(avg)']
+    print(f"Recall  | {rec_0:.2f}% | {rec_1:.2f}% | {rec_avg:.2f}%")
+
+    # Linha 261-262: Imprime F1-Score
+    f1_0, f1_1, f1_avg = results['F1(0)'], results['F1(1)'], results['F1(avg)']
+    print(f"F1-Score| {f1_0:.2f}% | {f1_1:.2f}% | {f1_avg:.2f}%")
+    print("-" * 65)
+
 
 # ==============================================================================
-# 5. Execução Principal e Avaliação
+# 6. Execução Principal e Avaliação
 # ==============================================================================
 
 # --- A. Preparação dos Dados ---
-df_raw = load_sgcc_data(DATA_FILE)
+df_raw = load_sgcc_data(DATA_FILE) # Linha 271
 
 if df_raw is None:
     print("Execução interrompida devido a um erro no carregamento dos dados.")
@@ -193,7 +259,7 @@ else:
     INPUT_DIM = X_train_scaled.shape[1]
 
     # --- B. Criação e Treinamento do Modelo ---
-    autoencoder = create_autoencoder(INPUT_DIM, ENCODING_DIM)
+    autoencoder = create_autoencoder(INPUT_DIM, ENCODING_DIM) # Linha 284
 
     # A arquitetura do AutoEncoder (o "Cloud")
     autoencoder.summary()
@@ -201,7 +267,7 @@ else:
     print("\n--- 4. Treinamento do AutoCloud (Apenas Dados Normais) ---")
 
     # O AutoCloud treina para minimizar o erro de reconstrução dos dados normais
-    history = autoencoder.fit(
+    history = autoencoder.fit( # Linha 292
         X_train_scaled, X_train_scaled,
         epochs=100,  # Ajuste conforme a necessidade
         batch_size=64,
@@ -214,21 +280,21 @@ else:
     print("\n--- 5. Detecção de Anomalias e Avaliação de Fraude (AutoCloud) ---")
 
     # 5.1. Calcular o Erro de Reconstrução no Teste
-    predictions = autoencoder.predict(X_test_scaled, verbose=0)
+    predictions = autoencoder.predict(X_test_scaled, verbose=0) # Linha 304
     # MSE: Erro entre o original e o reconstruído
-    mse = np.mean(np.power(X_test_scaled - predictions, 2), axis=1)
+    mse = np.mean(np.power(X_test_scaled - predictions, 2), axis=1) # Linha 306
 
-    error_df = pd.DataFrame({'Reconstruction_Error': mse, 'True_Class': Y_test})
+    error_df = pd.DataFrame({'Reconstruction_Error': mse, 'True_Class': Y_test}) # Linha 308
 
     # 5.2. Determinação do Limiar (Threshold)
     # Limiar: 95º percentil dos erros de reconstrução da classe NORMAL no conjunto de teste
-    normal_error = error_df[error_df['True_Class'] == 0]['Reconstruction_Error']
-    THRESHOLD = np.percentile(normal_error, 95)
+    normal_error = error_df[error_df['True_Class'] == 0]['Reconstruction_Error'] # Linha 312
+    THRESHOLD = np.percentile(normal_error, 95) # Linha 313
 
     print(f"Limiar de Anomalia (95º Percentil do Erro Normal): {THRESHOLD:.4f}")
 
     # 5.3. Classificação e Resultados
-    # Classifica como 1 (Anomalia/Fraude) se o erro for maior que o limiar
+    # Linha 318: Classifica como 1 (Anomalia/Fraude) se o erro for maior que o limiar
     Y_pred = (error_df['Reconstruction_Error'] > THRESHOLD).astype(int)
 
     print("\n" + "=" * 60)
@@ -236,9 +302,11 @@ else:
     print("=" * 60)
 
     # AUC-ROC usando o erro como pontuação
-    auc_score = roc_auc_score(Y_test, mse)
+    auc_score = roc_auc_score(Y_test, mse) # Linha 326
     print(f"AUC-ROC (Pontuação de Erro de Reconstrução): {auc_score:.4f}")
 
-    # Relatório de Classificação (O foco é o Recall na classe 1 - Anomalia/Fraude)
-    print("\nRelatório de Classificação (Anomalias = Classe 1):")
-    print(classification_report(Y_test, Y_pred, target_names=['Normal (0)', 'Anomalia (1)']))
+    # Linha 329-330: Chamada às funções de avaliação detalhada
+    detailed_results = evaluate_model_detailed(Y_test, Y_pred)
+    print_detailed_results("Métricas de Classificação Detalhadas (Anomalias = Classe 1)", detailed_results)
+
+    # O relatório de classificação original foi removido e substituído pela tabela detalhada.
